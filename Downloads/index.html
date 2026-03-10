@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TS/Express Learning Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --surface: #0f1318;
+    --surface2: #151b22;
+    --border: #1e2830;
+    --amber: #f0a500;
+    --amber-dim: #b07800;
+    --green: #00d46a;
+    --green-dim: #007a3e;
+    --cyan: #00c8d4;
+    --red: #ff4d6a;
+    --text: #c8d8e8;
+    --text-dim: #5a7080;
+    --text-bright: #e8f4ff;
+    --scan: rgba(255,255,255,0.015);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans JP', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+    cursor: crosshair;
+  }
+
+  /* CRT scanlines overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      var(--scan) 2px,
+      var(--scan) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* Noise texture */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 999;
+    opacity: 0.5;
+  }
+
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  .header {
+    margin-bottom: 40px;
+    animation: fadeSlideDown 0.6s ease both;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .prompt-symbol {
+    color: var(--green);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    animation: blink 1.2s step-end infinite;
+  }
+
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(20px, 4vw, 28px);
+    font-weight: 700;
+    color: var(--amber);
+    letter-spacing: -0.5px;
+    text-shadow: 0 0 20px rgba(240,165,0,0.4);
+  }
+
+  .subtitle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-left: 30px;
+    letter-spacing: 1px;
+  }
+
+  /* Stats bar */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 32px;
+    animation: fadeSlideDown 0.6s ease 0.1s both;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--amber-dim);
+    padding: 16px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--amber);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.8s ease;
+  }
+
+  .stat-card.loaded::before {
+    transform: scaleX(1);
+  }
+
+  .stat-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-bright);
+  }
+
+  .stat-value span {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+
+  /* Progress bar */
+  .progress-section {
+    margin-bottom: 32px;
+    animation: fadeSlideDown 0.6s ease 0.2s both;
+  }
+
+  .progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .progress-track {
+    height: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green-dim), var(--green));
+    transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+  }
+
+  .progress-fill::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: -2px;
+    bottom: -2px;
+    width: 3px;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+  }
+
+  /* Topic sections */
+  .topic-section {
+    margin-bottom: 24px;
+    animation: fadeSlideDown 0.6s ease both;
+  }
+
+  .topic-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cyan);
+    margin-bottom: 2px;
+    cursor: pointer;
+    transition: background 0.2s;
+    user-select: none;
+  }
+
+  .topic-header:hover {
+    background: var(--surface2);
+  }
+
+  .topic-icon {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--cyan);
+    width: 20px;
+  }
+
+  .topic-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-bright);
+    flex: 1;
+  }
+
+  .topic-progress {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .topic-toggle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform 0.3s;
+  }
+
+  .topic-toggle.open {
+    transform: rotate(90deg);
+  }
+
+  .items-list {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .items-list.open {
+    max-height: 800px;
+  }
+
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px 10px 35px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    cursor: pointer;
+    transition: background 0.15s;
+    position: relative;
+  }
+
+  .item:hover {
+    background: var(--surface2);
+  }
+
+  .item::before {
+    content: '';
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    border: 1px solid var(--text-dim);
+    background: transparent;
+    transition: all 0.2s;
+  }
+
+  .item.done::before {
+    background: var(--green);
+    border-color: var(--green);
+    box-shadow: 0 0 6px var(--green);
+  }
+
+  .item-label {
+    font-size: 13px;
+    color: var(--text);
+    flex: 1;
+    line-height: 1.6;
+    transition: color 0.2s;
+  }
+
+  .item.done .item-label {
+    color: var(--text-dim);
+    text-decoration: line-through;
+    text-decoration-color: var(--green-dim);
+  }
+
+  .item-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 2px 6px;
+    border: 1px solid;
+    letter-spacing: 1px;
+  }
+
+  .tag-done { color: var(--green-dim); border-color: var(--green-dim); }
+  .tag-wip  { color: var(--amber-dim); border-color: var(--amber-dim); }
+  .tag-todo { color: var(--text-dim);  border-color: var(--border); }
+
+  /* Terminal log */
+  .terminal {
+    margin-top: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    animation: fadeSlideDown 0.6s ease 0.4s both;
+  }
+
+  .terminal-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border);
+  }
+
+  .terminal-title {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-left: auto;
+  }
+
+  .terminal-body {
+    padding: 16px;
+    min-height: 80px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .log-line {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 4px;
+    animation: logAppear 0.3s ease both;
+  }
+
+  @keyframes logAppear {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .log-time { color: var(--text-dim); }
+  .log-msg  { color: var(--text); }
+  .log-msg.success { color: var(--green); }
+  .log-msg.undo    { color: var(--amber); }
+
+  /* Animations */
+  @keyframes fadeSlideDown {
+    from { opacity: 0; transform: translateY(-12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .stats-bar { grid-template-columns: 1fr 1fr; }
+    .stats-bar .stat-card:last-child { grid-column: span 2; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header class="header">
+    <div class="header-top">
+      <span class="prompt-symbol">▋</span>
+      <h1>TS_EXPRESS_TRACKER</h1>
+    </div>
+    <div class="subtitle">// 畠山's backend learning log — 2026</div>
+  </header>
+
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-card" id="statTotal">
+      <div class="stat-label">TOTAL ITEMS</div>
+      <div class="stat-value" id="valTotal">0</div>
+    </div>
+    <div class="stat-card" id="statDone">
+      <div class="stat-label">COMPLETED</div>
+      <div class="stat-value" id="valDone">0</div>
+    </div>
+    <div class="stat-card" id="statPct">
+      <div class="stat-label">PROGRESS</div>
+      <div class="stat-value" id="valPct">0<span>%</span></div>
+    </div>
+  </div>
+
+  <div class="progress-section">
+    <div class="progress-label">
+      <span id="progressLabel">OVERALL COMPLETION</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <div id="topicContainer"></div>
+
+  <div class="terminal">
+    <div class="terminal-titlebar">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      <div class="terminal-title">ACTIVITY LOG</div>
+      <button onclick="resetAll()" style="margin-left:12px;font-family:'JetBrains Mono',monospace;font-size:10px;background:transparent;border:1px solid #ff4d6a44;color:#ff4d6a88;padding:2px 8px;cursor:pointer;letter-spacing:1px;transition:all 0.2s" onmouseover="this.style.borderColor='#ff4d6a';this.style.color='#ff4d6a'" onmouseout="this.style.borderColor='#ff4d6a44';this.style.color='#ff4d6a88'">RESET</button>
+    </div>
+    <div class="terminal-body" id="terminalBody">
+      <div class="log-line">
+        <span class="log-time">[BOOT]</span>
+        <span class="log-msg">tracker initialized. click items to mark complete.</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const data = [
+  {
+    id: 'arch',
+    name: 'アーキテクチャ / Project Setup',
+    color: '#00c8d4',
+    items: [
+      { id: 'a1', label: 'Controller / Service / Routes 三層構造', done: true },
+      { id: 'a2', label: 'TypeScript + Express 初期セットアップ', done: true },
+      { id: 'a3', label: 'tsconfig.json / ESLint 設定', done: true },
+      { id: 'a4', label: 'エラーハンドリングミドルウェア', done: ture },
+    ]
+  },
+  {
+    id: 'db',
+    name: 'データベース / Prisma',
+    color: '#00d46a',
+    items: [
+      { id: 'd1', label: 'Prisma 7 + Driver Adapter パターン', done: true },
+      { id: 'd2', label: 'SQLite スキーマ設計', done: true },
+      { id: 'd3', label: 'Prisma マイグレーション', done: true },
+      { id: 'd4', label: 'Prismaエラーハンドリング改善', done: true },
+      { id: 'd5', label: 'リレーション / JOIN クエリ', done: false },
+    ]
+  },
+  {
+    id: 'auth',
+    name: '認証 / JWT & Security',
+    color: '#f0a500',
+    items: [
+      { id: 'au1', label: 'JWT 認証実装', done: true },
+      { id: 'au2', label: 'bcryptjs パスワードハッシュ', done: true },
+      { id: 'au3', label: 'Postman で動作検証 + GitHub push', done: true },
+      { id: 'au4', label: 'Refresh Token 実装', done: false },
+      { id: 'au5', label: 'Rate Limiting / Helmet', done: false },
+    ]
+  },
+  {
+    id: 'test',
+    name: 'テスト / Testing',
+    color: '#ff4d6a',
+    items: [
+      { id: 't1', label: 'Jest + Supertest セットアップ', done: true },
+      { id: 't2', label: 'ユニットテスト（Service層）', done: false },
+      { id: 't3', label: 'インテグレーションテスト（API）', done: true },
+      { id: 't4', label: 'テストカバレッジ計測', done: false },
+    ]
+  },
+  {
+    id: 'next',
+    name: '発展トピック / Next Steps',
+    color: '#a78bfa',
+    items: [
+      { id: 'n1', label: 'Docker コンテナ化', done: false },
+      { id: 'n2', label: '環境変数管理（dotenv / .env.example）', done: false },
+      { id: 'n3', label: 'Logging（Winston / Pino）', done: false },
+      { id: 'n4', label: 'OpenAPI / Swagger ドキュメント', done: false },
+    ]
+  },
+  {
+  id: 'frontend',
+  name: 'フロントエンド連携 / React + Axios',
+  color: '#60a5fa',
+  items: [
+    { id: 'f1', label: 'CORS設定', done: true },
+    { id: 'f2', label: 'Vite + React + TypeScript 環境構築', done: true },
+    { id: 'f3', label: 'axios でAPI通信', done: true },
+    { id: 'f4', label: 'ログイン画面実装', done: true },
+    { id: 'f5', label: 'ユーザー一覧画面実装', done: true },
+    { id: 'f6', label: 'フロント・バックエンド連携確認', done: true },
+  ]
+},
+];
+
+// State — localStorage から復元、なければデフォルト値
+const STORAGE_KEY = 'ts_express_tracker_v1';
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  // デフォルト（初回）
+  const defaults = {};
+  data.forEach(topic => topic.items.forEach(item => {
+    defaults[item.id] = item.done;
+  }));
+  return defaults;
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch(e) {}
+}
+
+const state = loadState();
+
+function getTime() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+}
+
+function log(msg, type = '') {
+  const body = document.getElementById('terminalBody');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-time">[${getTime()}]</span><span class="log-msg ${type}">${msg}</span>`;
+  body.appendChild(line);
+  body.scrollTop = body.scrollHeight;
+  // Keep max 20 lines
+  while (body.children.length > 20) body.removeChild(body.firstChild);
+}
+
+function updateStats() {
+  const total = Object.keys(state).length;
+  const done = Object.values(state).filter(Boolean).length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+
+  document.getElementById('valTotal').textContent = total;
+  document.getElementById('valDone').textContent = done;
+  document.getElementById('valPct').innerHTML = `${pct}<span>%</span>`;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressPct').textContent = pct + '%';
+}
+
+function updateTopicProgress(topicId) {
+  const topic = data.find(t => t.id === topicId);
+  const done = topic.items.filter(i => state[i.id]).length;
+  const total = topic.items.length;
+  document.getElementById(`progress_${topicId}`).textContent = `${done}/${total}`;
+}
+
+function renderTopics() {
+  const container = document.getElementById('topicContainer');
+  data.forEach((topic, idx) => {
+    const section = document.createElement('div');
+    section.className = 'topic-section';
+    section.style.animationDelay = (0.25 + idx * 0.07) + 's';
+
+    const doneCnt = topic.items.filter(i => state[i.id]).length;
+
+    section.innerHTML = `
+      <div class="topic-header" onclick="toggleTopic('${topic.id}')">
+        <span class="topic-icon">[${idx+1}]</span>
+        <span class="topic-name">${topic.name}</span>
+        <span class="topic-progress" id="progress_${topic.id}">${doneCnt}/${topic.items.length}</span>
+        <span class="topic-toggle" id="toggle_${topic.id}">▶</span>
+      </div>
+      <div class="items-list" id="list_${topic.id}">
+        ${topic.items.map(item => `
+          <div class="item${state[item.id] ? ' done' : ''}" id="item_${item.id}" onclick="toggleItem('${topic.id}','${item.id}')">
+            <span class="item-label">${item.label}</span>
+            <span class="item-tag ${state[item.id] ? 'tag-done' : 'tag-todo'}" id="tag_${item.id}">${state[item.id] ? 'DONE' : 'TODO'}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    container.appendChild(section);
+  });
+
+  // Open first topic by default
+  toggleTopic('arch');
+}
+
+function toggleTopic(topicId) {
+  const list = document.getElementById(`list_${topicId}`);
+  const toggle = document.getElementById(`toggle_${topicId}`);
+  const isOpen = list.classList.contains('open');
+  list.classList.toggle('open', !isOpen);
+  toggle.classList.toggle('open', !isOpen);
+}
+
+function toggleItem(topicId, itemId) {
+  state[itemId] = !state[itemId];
+  const el = document.getElementById(`item_${itemId}`);
+  const tag = document.getElementById(`tag_${itemId}`);
+
+  el.classList.toggle('done', state[itemId]);
+  tag.className = `item-tag ${state[itemId] ? 'tag-done' : 'tag-todo'}`;
+  tag.textContent = state[itemId] ? 'DONE' : 'TODO';
+
+  const topic = data.find(t => t.id === topicId);
+  const item = topic.items.find(i => i.id === itemId);
+
+  if (state[itemId]) {
+    log(`✓ COMPLETED → ${item.label}`, 'success');
+  } else {
+    log(`↩ REVERTED  → ${item.label}`, 'undo');
+  }
+
+  updateTopicProgress(topicId);
+  updateStats();
+  saveState();
+}
+
+// Init
+renderTopics();
+updateStats();
+
+function resetAll() {
+  if (!confirm('進捗をリセットしますか？')) return;
+  Object.keys(state).forEach(k => { state[k] = false; });
+  saveState();
+  // Re-render
+  document.getElementById('topicContainer').innerHTML = '';
+  renderTopics();
+  updateStats();
+  log('⚠ ALL PROGRESS RESET', 'undo');
+}
+
+// Animate stat borders after load
+setTimeout(() => {
+  document.querySelectorAll('.stat-card').forEach(c => c.classList.add('loaded'));
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    log('💾 saved progress loaded from localStorage', 'success');
+  } else {
+    log('tracker initialized. click items to mark complete.');
+  }
+}, 300);
+</script>
+</body>
+</html>
